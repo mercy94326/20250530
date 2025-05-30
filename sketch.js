@@ -1,19 +1,21 @@
-// EdTech 手勢互動遊戲完整版 + 堆積木 + 切西瓜特效
+// EdTech 手勢互動遊戲完整版 + 堆積木 + 切西瓜遊戲
 let video;
 let handpose;
 let predictions = [];
 let bubbles = [];
-let fruits = [];
-let slicedFruits = [];
 let score = 0;
 let timer = 60;
 let gameStarted = false;
 let lastBubbleTime = 0;
-let lastFruitTime = 0;
 let currentGame = "quiz";
 let blocks = [];
 let holdingBlock = null;
 let stackHeight = 0;
+let swayOffset = 0;
+let swayDirection = 1;
+let fruits = [];
+let fruitImages = {};
+let fruitHalves = [];
 
 let questionSet = [
   { text: "教育科技強調科技與學習的整合", correct: true },
@@ -24,6 +26,11 @@ let questionSet = [
   { text: "教學設計不需要考慮學生學習歷程", correct: false },
   { text: "教育科技與課程設計可結合進行教學創新", correct: true }
 ];
+
+function preload() {
+  fruitImages.watermelon = loadImage('https://i.imgur.com/jgKjGLA.png');
+  fruitImages.bomb = loadImage('https://i.imgur.com/D8UXpRn.png');
+}
 
 function setup() {
   createCanvas(640, 480);
@@ -50,23 +57,21 @@ function setup() {
 }
 
 function resetGame() {
+  gameStarted = true;
   if (currentGame === "quiz") {
     score = 0;
     timer = 60;
     bubbles = [];
-    gameStarted = true;
-    loop();
   } else if (currentGame === "blocks") {
     blocks = [];
     holdingBlock = null;
     stackHeight = 0;
-    loop();
   } else if (currentGame === "fruit") {
     fruits = [];
-    slicedFruits = [];
+    fruitHalves = [];
     score = 0;
-    loop();
   }
+  loop();
 }
 
 function draw() {
@@ -80,7 +85,12 @@ function draw() {
   textSize(20);
   stroke(0);
   strokeWeight(3);
-  text(currentGame === "quiz" ? `分數：${score}  時間：${timer}` : currentGame === "blocks" ? `堆積木模式 高度：${stackHeight}` : `切水果模式 分數：${score}`, width / 2, 20);
+  text(
+    currentGame === "quiz" ? `分數：${score}  時間：${timer}` :
+    currentGame === "blocks" ? `堆積木高度：${stackHeight}` :
+    `切西瓜分數：${score}`,
+    width / 2, 20
+  );
   noStroke();
 
   if (currentGame === "quiz") {
@@ -93,6 +103,7 @@ function draw() {
       noStroke();
       return;
     }
+
     if (timer <= 0) {
       textSize(32);
       fill(255);
@@ -103,11 +114,13 @@ function draw() {
       noLoop();
       return;
     }
+
     if (millis() - lastBubbleTime > 2000) {
       let q = random(questionSet);
       bubbles.push(new Bubble(q.text, q.correct));
       lastBubbleTime = millis();
     }
+
     for (let i = bubbles.length - 1; i >= 0; i--) {
       bubbles[i].update();
       bubbles[i].display();
@@ -117,34 +130,24 @@ function draw() {
     for (let block of blocks) block.display();
     if (holdingBlock) holdingBlock.display();
   } else if (currentGame === "fruit") {
-    if (millis() - lastFruitTime > 1500) {
-      let isBomb = random() < 0.2;
-      fruits.push(new Fruit(isBomb));
-      lastFruitTime = millis();
+    if (random(1) < 0.03) {
+      fruits.push(new Fruit(random(width), height + 30));
     }
+
     for (let i = fruits.length - 1; i >= 0; i--) {
       fruits[i].update();
       fruits[i].display();
       if (fruits[i].offScreen()) fruits.splice(i, 1);
     }
-    for (let i = slicedFruits.length - 1; i >= 0; i--) {
-      slicedFruits[i].update();
-      slicedFruits[i].display();
-      if (slicedFruits[i].offScreen()) slicedFruits.splice(i, 1);
+
+    for (let i = fruitHalves.length - 1; i >= 0; i--) {
+      fruitHalves[i].update();
+      fruitHalves[i].display();
+      if (fruitHalves[i].offScreen()) fruitHalves.splice(i, 1);
     }
   }
 
   drawHandAndDetect();
-}
-
-function keyPressed() {
-  if (!gameStarted && currentGame === "quiz") {
-    gameStarted = true;
-    timer = 60;
-    score = 0;
-    bubbles = [];
-    loop();
-  }
 }
 
 function drawHandAndDetect() {
@@ -178,12 +181,16 @@ function drawHandAndDetect() {
     } else if (currentGame === "blocks") {
       let handX = width - indexTip[0];
       let handY = indexTip[1];
+
+      swayOffset += swayDirection * 0.5;
+      if (abs(swayOffset) > 10) swayDirection *= -1;
+
       if (!holdingBlock) {
         holdingBlock = new Block(handX, handY);
       } else {
-        holdingBlock.x = handX;
+        holdingBlock.x = handX + swayOffset;
         holdingBlock.y = handY;
-        if (dist(indexTip[0], thumbTip[0]) < 30 && dist(indexTip[1], thumbTip[1]) < 30) {
+        if (dist(indexTip[0], indexTip[1], thumbTip[0], thumbTip[1]) < 30) {
           holdingBlock.snapTo(stackHeight);
           blocks.push(holdingBlock);
           stackHeight++;
@@ -191,16 +198,18 @@ function drawHandAndDetect() {
         }
       }
     } else if (currentGame === "fruit") {
-      let x = width - indexTip[0];
-      let y = indexTip[1];
+      let tipX = width - indexTip[0];
+      let tipY = indexTip[1];
       for (let i = fruits.length - 1; i >= 0; i--) {
         let f = fruits[i];
-        if (dist(x, y, f.x, f.y) < f.r) {
-          if (f.isBomb) {
+        if (!f.cut && dist(tipX, tipY, f.x, f.y) < f.r) {
+          if (f.type === "bomb") {
             score = 0;
           } else {
             score++;
-            slicedFruits.push(new SlicedFruit(f.x, f.y, f.r));
+            f.cut = true;
+            fruitHalves.push(new FruitHalf(f.x, f.y, f.r, -3));
+            fruitHalves.push(new FruitHalf(f.x, f.y, f.r, 3));
           }
           fruits.splice(i, 1);
         }
@@ -218,12 +227,15 @@ class Bubble {
     this.r = 60;
     this.speed = 2;
   }
+
   update() {
     this.y += this.speed;
   }
+
   offScreen() {
     return this.y > height + this.r;
   }
+
   display() {
     fill(this.correct ? 'lightblue' : 'lightpink');
     stroke(0);
@@ -244,10 +256,12 @@ class Block {
     this.w = 50;
     this.h = 30;
   }
+
   snapTo(level) {
-    this.x = width / 2 + random(-20, 20);
-    this.y = height - 30 - level * 32;
+    this.y = height - level * this.h - this.h / 2;
+    this.x = width / 2;
   }
+
   display() {
     fill("gold");
     stroke(0);
@@ -257,51 +271,54 @@ class Block {
 }
 
 class Fruit {
-  constructor(isBomb) {
-    this.x = random(100, width - 100);
-    this.y = height + 50;
-    this.r = 30;
-    this.isBomb = isBomb;
-    this.vx = random(-1, 1);
-    this.vy = random(-5, -8);
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.r = 40;
+    this.speedY = -random(7, 10);
+    this.gravity = 0.3;
+    this.type = random(1) < 0.2 ? "bomb" : "watermelon";
+    this.cut = false;
   }
+
   update() {
-    this.x += this.vx;
-    this.y += this.vy;
-    this.vy += 0.2;
+    this.y += this.speedY;
+    this.speedY += this.gravity;
   }
+
   offScreen() {
-    return this.y > height + 50;
+    return this.y > height + this.r;
   }
+
   display() {
-    fill(this.isBomb ? 'black' : 'green');
-    stroke(255);
-    ellipse(this.x, this.y, this.r * 2);
+    imageMode(CENTER);
+    image(fruitImages[this.type], this.x, this.y, this.r * 2, this.r * 2);
   }
 }
 
-class SlicedFruit {
-  constructor(x, y, r) {
-    this.pieces = [
-      { x: x - 10, y, vx: -2, vy: -3, r },
-      { x: x + 10, y, vx: 2, vy: -3, r }
-    ];
+class FruitHalf {
+  constructor(x, y, r, dx) {
+    this.x = x;
+    this.y = y;
+    this.r = r;
+    this.dx = dx;
+    this.dy = random(-2, -5);
+    this.gravity = 0.3;
   }
+
   update() {
-    for (let p of this.pieces) {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.vy += 0.2;
-    }
+    this.x += this.dx;
+    this.y += this.dy;
+    this.dy += this.gravity;
   }
+
   offScreen() {
-    return this.pieces.every(p => p.y > height + 50);
+    return this.y > height + this.r;
   }
+
   display() {
-    fill('lightgreen');
+    fill("lightgreen");
     stroke(0);
-    for (let p of this.pieces) {
-      ellipse(p.x, p.y, p.r, p.r);
-    }
+    ellipse(this.x, this.y, this.r, this.r / 2);
   }
 }
