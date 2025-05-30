@@ -1,4 +1,4 @@
-// EdTech 手勢互動遊戲完整版 + 堆積木小遊戲
+// EdTech 手勢互動遊戲完整版 + 改良版堆積木小遊戲
 let video;
 let handpose;
 let predictions = [];
@@ -10,6 +10,7 @@ let lastBubbleTime = 0;
 let currentGame = "quiz";
 let blocks = [];
 let holdingBlock = null;
+let stackHeight = 0;
 
 let questionSet = [
   { text: "教育科技強調科技與學習的整合", correct: true },
@@ -53,6 +54,7 @@ function resetGame() {
   } else if (currentGame === "blocks") {
     blocks = [];
     holdingBlock = null;
+    stackHeight = 0;
     loop();
   }
 }
@@ -68,7 +70,7 @@ function draw() {
   textSize(20);
   stroke(0);
   strokeWeight(3);
-  text(currentGame === "quiz" ? `分數：${score}  時間：${timer}` : "堆積木模式", width / 2, 20);
+  text(currentGame === "quiz" ? `分數：${score}  時間：${timer}` : `堆積木模式｜高度：${stackHeight}`, width / 2, 20);
   noStroke();
 
   if (currentGame === "quiz") {
@@ -127,8 +129,6 @@ function drawHandAndDetect() {
     const hand = predictions[0].landmarks;
     const thumbTip = hand[4];
     const indexTip = hand[8];
-    const middleTip = hand[12];
-    const wrist = hand[0];
 
     noFill();
     stroke(0, 255, 0);
@@ -136,6 +136,8 @@ function drawHandAndDetect() {
     for (let pt of hand) ellipse(width - pt[0], pt[1], 8, 8);
 
     if (currentGame === "quiz") {
+      const middleTip = hand[12];
+      const wrist = hand[0];
       for (let i = bubbles.length - 1; i >= 0; i--) {
         let b = bubbles[i];
         if (dist(width - indexTip[0], indexTip[1], b.x, b.y) < b.r) {
@@ -153,13 +155,25 @@ function drawHandAndDetect() {
     } else if (currentGame === "blocks") {
       let handX = width - indexTip[0];
       let handY = indexTip[1];
+      let pinchDist = dist(indexTip[0], indexTip[1], thumbTip[0], thumbTip[1]);
       if (!holdingBlock) {
         holdingBlock = new Block(handX, handY);
       } else {
         holdingBlock.x = handX;
         holdingBlock.y = handY;
-        if (thumbTip[1] > wrist[1] + 40) {
+        if (pinchDist < 30) {
+          // 吸附到上方積木或畫面底部
+          if (blocks.length === 0) {
+            holdingBlock.y = height - holdingBlock.h / 2;
+            holdingBlock.x = width / 2;
+          } else {
+            let topBlock = blocks[blocks.length - 1];
+            holdingBlock.y = topBlock.y - topBlock.h;
+            let wobble = random(-10 + stackHeight, 10 - stackHeight); // 疊越高晃越多
+            holdingBlock.x = topBlock.x + wobble;
+          }
           blocks.push(holdingBlock);
+          stackHeight++;
           holdingBlock = null;
         }
       }
